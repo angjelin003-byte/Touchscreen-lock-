@@ -40,6 +40,18 @@ test('AndroidManifest.xml declares SYSTEM_ALERT_WINDOW and TouchLockService', ()
   assert.equal(manifestXml.includes('.TouchLockService'), true);
 });
 
+test('TouchLockService.kt removes red border indicator and supports USB-C mouse pass-through', () => {
+  const serviceCode = fs.readFileSync(
+    'app/src/main/java/com/touchlock/edge/TouchLockService.kt',
+    'utf8'
+  );
+  assert.equal(serviceCode.includes('blockerBorderView'), false);
+  assert.equal(serviceCode.includes('flashBlockedTouchFeedback'), false);
+  assert.equal(serviceCode.includes('isUsbMouseEvent'), true);
+  assert.equal(serviceCode.includes('SOURCE_MOUSE'), true);
+  assert.equal(serviceCode.includes('TOOL_TYPE_MOUSE'), true);
+});
+
 test('filterRepoFiles filters by category and search query accurately', () => {
   const kotlinOnly = filterRepoFiles(ANDROID_REPO_FILES, 'kotlin', '');
   assert.equal(kotlinOnly.length, 3);

@@ -49,6 +49,10 @@ class MainActivity : AppCompatActivity() {
             requestOverlayPermission()
         }
 
+        binding.btnOpenAppInfo.setOnClickListener {
+            openAppDetailsSettings()
+        }
+
         binding.btnToggleOverlayService.setOnClickListener {
             val isRunning = prefs.getBoolean(TouchLockService.KEY_SERVICE_RUNNING, false)
             if (isRunning) {
@@ -89,6 +93,14 @@ class MainActivity : AppCompatActivity() {
     private fun requestOverlayPermission() {
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        overlayPermissionLauncher.launch(intent)
+    }
+
+    private fun openAppDetailsSettings() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.parse("package:$packageName")
         )
         overlayPermissionLauncher.launch(intent)

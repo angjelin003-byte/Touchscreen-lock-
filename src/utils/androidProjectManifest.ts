@@ -12,7 +12,7 @@ export const ANDROID_REPO_FILES: AndroidRepoFile[] = [
     category: 'kotlin',
     language: 'kotlin',
     summary:
-      'Foreground service managing two WindowManager overlays: the lower-Z full-screen touchBlockerView (consumes all screen touches when locked) and the higher-Z edgeButtonView docked on the screen edge.',
+      'Foreground service managing 4 completely transparent touch-blocker panels (no red border or popup) that block touchscreen fingers while opening a pass-through aperture under a wired USB-C mouse cursor, plus the edge toggle button.',
     content: `package com.touchlock.edge
 
 import android.annotation.SuppressLint
@@ -28,128 +28,101 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import kotlin.math.abs
 
 class TouchLockService : Service() {
 
+    private data class BlockerPanel(
+        val view: View,
+        val params: WindowManager.LayoutParams
+    )
+
     private lateinit var windowManager: WindowManager
     private lateinit var controller: TouchLockController
-    private val mainHandler = Handler(Looper.getMainLooper())
 
-    private var touchBlockerView: FrameLayout? = null
-    private var blockerBorderView: View? = null
-    private var blockerHintText: TextView? = null
-    private var blockerParams: WindowManager.LayoutParams? = null
+    private val blockerPanels = mutableListOf<BlockerPanel>()
 
     private var edgeButtonView: LinearLayout? = null
     private var edgeIconView: ImageView? = null
     private var edgeStatusDot: View? = null
     private var edgeParams: WindowManager.LayoutParams? = null
 
-    private val hideBorderRunnable = Runnable {
-        blockerBorderView?.alpha = 0f
-        blockerHintText?.alpha = 0f
-    }
+    private var mouseCursorX: Int? = null
+    private var mouseCursorY: Int? = null
+    private var lastMouseLayoutUpdateMs: Long = 0L
 
-    override fun onCreate() {
-        super.onCreate()
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupBlockerPanelListeners(panel: BlockerPanel) {
+        panel.view.setOnHoverListener { _, event ->
+            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
+                val mx = (panel.params.x + event.x).toInt()
+                val my = (panel.params.y + event.y).toInt()
+                updateMouseAperture(mx, my, force = false)
+            }
+            false
+        }
 
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        controller = TouchLockController(
-            initialLocked = false,
-            requireDoubleTapToUnlock = prefs.getBoolean(KEY_DOUBLE_TAP_UNLOCK, false),
-            dockedLeftEdge = prefs.getBoolean(KEY_DOCKED_LEFT, false),
-            yOffsetPx = prefs.getInt(KEY_Y_OFFSET_PX, dpToPx(220))
-        )
+        panel.view.setOnGenericMotionListener { _, event ->
+            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
+                val mx = (panel.params.x + event.x).toInt()
+                val my = (panel.params.y + event.y).toInt()
+                updateMouseAperture(mx, my, force = true)
+            }
+            false
+        }
 
-        createNotificationChannel()
-        startServiceForeground()
+        panel.view.setOnTouchListener { _, event ->
+            if (!controller.isTouchLocked) {
+                return@setOnTouchListener false
+            }
 
-        if (Settings.canDrawOverlays(this)) {
-            attachOverlays()
-            setServiceRunningState(true)
-        } else {
-            stopSelf()
+            if (isUsbMouseEvent(event)) {
+                val mx = (panel.params.x + event.x).toInt()
+                val my = (panel.params.y + event.y).toInt()
+                updateMouseAperture(mx, my, force = true)
+                return@setOnTouchListener false
+            }
+
+            // Finger touch: close any open mouse aperture and consume the touch event silently
+            if (mouseCursorX != null || mouseCursorY != null) {
+                mouseCursorX = null
+                mouseCursorY = null
+                applyBlockerPanelsLayout()
+            }
+            true
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!Settings.canDrawOverlays(this)) {
-            setServiceRunningState(false)
-            stopSelf()
-            return START_NOT_STICKY
+    private fun isUsbMouseEvent(event: MotionEvent): Boolean {
+        val source = event.source
+        if ((source and InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE) {
+            return true
         }
-
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        controller.requireDoubleTapToUnlock = prefs.getBoolean(KEY_DOUBLE_TAP_UNLOCK, false)
-        val prefLeft = prefs.getBoolean(KEY_DOCKED_LEFT, controller.dockedLeftEdge)
-        if (prefLeft != controller.dockedLeftEdge) {
-            controller.dockedLeftEdge = prefLeft
-            applyEdgeButtonLayout()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            (source and InputDevice.SOURCE_MOUSE_RELATIVE) == InputDevice.SOURCE_MOUSE_RELATIVE
+        ) {
+            return true
         }
-
-        when (intent?.action) {
-            ACTION_TOGGLE_LOCK -> {
-                controller.setLockedState(!controller.isTouchLocked)
-                syncOverlayState()
-            }
-            ACTION_LOCK_NOW -> {
-                controller.setLockedState(true)
-                syncOverlayState()
-            }
-            ACTION_UNLOCK_NOW -> {
-                controller.setLockedState(false)
-                syncOverlayState()
-            }
-            ACTION_STOP_SERVICE -> {
-                controller.setLockedState(false)
-                setServiceRunningState(false)
-                stopSelf()
-                return START_NOT_STICKY
-            }
-            else -> {
-                syncOverlayState()
+        for (i in 0 until event.pointerCount) {
+            val toolType = event.getToolType(i)
+            if (toolType == MotionEvent.TOOL_TYPE_MOUSE) {
+                return true
             }
         }
-
-        return START_STICKY
-    }
-
-    override fun onDestroy() {
-        mainHandler.removeCallbacks(hideBorderRunnable)
-        removeOverlays()
-        setServiceRunningState(false)
-        super.onDestroy()
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    private fun lockedBlockerFlags(): Int {
-        return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-    }
-
-    private fun unlockedBlockerFlags(): Int {
-        return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+        return false
     }
 }`
   },
@@ -158,7 +131,7 @@ class TouchLockService : Service() {
     category: 'kotlin',
     language: 'kotlin',
     summary:
-      'Pure Kotlin state machine handling single-tap and double-tap unlock rules, vertical edge dragging bounds, and left/right edge snapping.',
+      'Pure Kotlin state machine handling single/double-tap unlock rules, edge button coordinates, and 4-panel USB-C mouse pass-through geometry.',
     content: `package com.touchlock.edge
 
 class TouchLockController(
@@ -173,56 +146,67 @@ class TouchLockController(
         AWAITING_SECOND_TAP
     }
 
+    data class PanelRect(
+        val x: Int,
+        val y: Int,
+        val width: Int,
+        val height: Int
+    ) {
+        val isVisible: Boolean
+            get() = width > 0 && height > 0
+    }
+
+    data class BlockerOverlayLayout(
+        val top: PanelRect,
+        val bottom: PanelRect,
+        val left: PanelRect,
+        val right: PanelRect
+    )
+
     var isTouchLocked: Boolean = initialLocked
         private set
 
     private var lastUnlockAttemptMs: Long = 0L
 
-    fun onEdgeButtonClick(nowMs: Long): ToggleOutcome {
-        if (!isTouchLocked) {
-            isTouchLocked = true
-            lastUnlockAttemptMs = 0L
-            return ToggleOutcome.LOCKED
+    fun computeBlockerLayout(
+        screenWidthPx: Int,
+        screenHeightPx: Int,
+        mouseX: Int?,
+        mouseY: Int?,
+        apertureRadiusPx: Int = DEFAULT_MOUSE_APERTURE_RADIUS_PX
+    ): BlockerOverlayLayout {
+        val w = screenWidthPx.coerceAtLeast(1)
+        val h = screenHeightPx.coerceAtLeast(1)
+
+        if (mouseX == null || mouseY == null || apertureRadiusPx <= 0) {
+            return BlockerOverlayLayout(
+                top = PanelRect(0, 0, w, h),
+                bottom = PanelRect(0, 0, 0, 0),
+                left = PanelRect(0, 0, 0, 0),
+                right = PanelRect(0, 0, 0, 0)
+            )
         }
 
-        if (requireDoubleTapToUnlock) {
-            val delta = nowMs - lastUnlockAttemptMs
-            if (delta in 1..DOUBLE_TAP_WINDOW_MS) {
-                isTouchLocked = false
-                lastUnlockAttemptMs = 0L
-                return ToggleOutcome.UNLOCKED
-            } else {
-                lastUnlockAttemptMs = nowMs
-                return ToggleOutcome.AWAITING_SECOND_TAP
-            }
-        }
+        val mx = mouseX.coerceIn(0, w)
+        val my = mouseY.coerceIn(0, h)
 
-        isTouchLocked = false
-        lastUnlockAttemptMs = 0L
-        return ToggleOutcome.UNLOCKED
-    }
+        val holeLeft = (mx - apertureRadiusPx).coerceIn(0, w)
+        val holeRight = (mx + apertureRadiusPx).coerceIn(0, w)
+        val holeTop = (my - apertureRadiusPx).coerceIn(0, h)
+        val holeBottom = (my + apertureRadiusPx).coerceIn(0, h)
+        val middleHeight = (holeBottom - holeTop).coerceAtLeast(0)
 
-    fun setLockedState(locked: Boolean) {
-        isTouchLocked = locked
-        lastUnlockAttemptMs = 0L
-    }
-
-    fun updateVerticalPosition(rawY: Int, screenHeightPx: Int, buttonHeightPx: Int): Int {
-        val minY = 64
-        val maxY = (screenHeightPx - buttonHeightPx - 64).coerceAtLeast(minY)
-        yOffsetPx = rawY.coerceIn(minY, maxY)
-        return yOffsetPx
-    }
-
-    fun updateEdgeSide(rawTouchX: Float, screenWidthPx: Int): Boolean {
-        if (screenWidthPx > 0) {
-            dockedLeftEdge = rawTouchX < (screenWidthPx / 2f)
-        }
-        return dockedLeftEdge
+        return BlockerOverlayLayout(
+            top = PanelRect(x = 0, y = 0, width = w, height = holeTop),
+            bottom = PanelRect(x = 0, y = holeBottom, width = w, height = (h - holeBottom).coerceAtLeast(0)),
+            left = PanelRect(x = 0, y = holeTop, width = holeLeft, height = middleHeight),
+            right = PanelRect(x = holeRight, y = holeTop, width = (w - holeRight).coerceAtLeast(0), height = middleHeight)
+        )
     }
 
     companion object {
         const val DOUBLE_TAP_WINDOW_MS = 650L
+        const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 10
     }
 }`
   },
@@ -283,6 +267,10 @@ class MainActivity : AppCompatActivity() {
             requestOverlayPermission()
         }
 
+        binding.btnOpenAppInfo.setOnClickListener {
+            openAppDetailsSettings()
+        }
+
         binding.btnToggleOverlayService.setOnClickListener {
             val isRunning = prefs.getBoolean(TouchLockService.KEY_SERVICE_RUNNING, false)
             if (isRunning) {
@@ -323,6 +311,14 @@ class MainActivity : AppCompatActivity() {
     private fun requestOverlayPermission() {
         val intent = Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        )
+        overlayPermissionLauncher.launch(intent)
+    }
+
+    private fun openAppDetailsSettings() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
             Uri.parse("package:$packageName")
         )
         overlayPermissionLauncher.launch(intent)

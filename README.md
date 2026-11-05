@@ -35,3 +35,29 @@ app/build/outputs/apk/debug/app-debug.apk
 ### Building on GitHub Actions
 
 This repository includes `.github/workflows/build.yml` and the complete Gradle Wrapper (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`). Pushing to `main`/`master` or triggering the workflow manually in the **Actions** tab will run `./gradlew assembleDebug` and upload `app-debug.apk` as a downloadable build artifact.
+
+## Fixing Grayed-Out Overlay Permission (Android 13–16 Restricted Settings / Advanced Protection)
+
+When you sideload an APK downloaded from a browser or GitHub Actions on Android 13+, Android marks it as a non-store session install and grays out sensitive permissions like **Display over other apps**.
+
+### Method 1: "Allow restricted settings" in App Info (Android 13 / 14 / 15)
+1. First, tap **Grant Overlay Permission** in the app and tap the grayed-out switch once so Android registers the attempt.
+2. Go back to the app and tap **Open App Info (⋮ → Allow Restricted Settings)** (or go to **Settings → Apps → All apps → TouchLock Edge**).
+3. Tap the **3-dot menu (`⋮`)** in the top-right corner of the App Info screen and select **Allow restricted settings** (verify with your PIN/fingerprint).
+4. Return to **Display over other apps** and enable **TouchLock Edge**.
+
+### Method 2: Grant Directly via ADB (Works Even When Advanced Protection Blocks the UI Toggle)
+If **Android Advanced Protection**, **Google Advanced Protection**, or **Samsung Auto Blocker** hides or disables the `Allow restricted settings` menu, you can grant the overlay permission directly via ADB (from a PC or on-device Wireless Debugging with Shizuku / aShell):
+
+```bash
+# Grant SYSTEM_ALERT_WINDOW directly:
+adb shell appops set com.touchlock.edge SYSTEM_ALERT_WINDOW allow
+
+# Or install the APK using the Play Store package installer flag so Android does not mark it as restricted:
+adb install -i com.android.vending app-debug.apk
+```
+
+### Method 3: Samsung Auto Blocker / Android Advanced Protection Toggle
+- **Samsung One UI 6+**: Open **Settings → Security and privacy → Auto Blocker** and temporarily toggle it off while granting the permission.
+- **Android 15/16 Advanced Protection / Google Play Protect**: Open **Settings → Security & privacy → Advanced Protection** (or **Google Play Store → Profile → Play Protect → Settings**) if device protection is blocking sideloaded app permissions.
+

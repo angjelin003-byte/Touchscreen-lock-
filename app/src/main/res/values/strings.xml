@@ -8,6 +8,8 @@
     <string name="permission_status_granted">Overlay permission granted and ready.</string>
     <string name="btn_grant_permission">Grant Overlay Permission</string>
     <string name="btn_permission_granted">Overlay Permission Granted</string>
+    <string name="restricted_settings_help">If the toggle is grayed out (Restricted setting / Advanced Protection): tap Open App Info below, tap the 3-dot menu (⋮) in the top-right corner, and select \"Allow restricted settings\", or grant via ADB.</string>
+    <string name="btn_open_app_info">Open App Info (⋮ → Allow Restricted Settings)</string>
 
     <string name="section_service_control">2. Edge Toggle Button Overlay</string>
     <string name="service_status_stopped">Edge overlay button is currently stopped.</string>

@@ -60,4 +60,26 @@ class TouchLockControllerTest {
         assertTrue(controller.updateEdgeSide(rawTouchX = 120f, screenWidthPx = 1080))
         assertFalse(controller.updateEdgeSide(rawTouchX = 880f, screenWidthPx = 1080))
     }
+
+    @Test
+    fun blockerLayoutCoversFullScreenWhenNoMouseOrCreatesApertureForUsbMouse() {
+        val controller = TouchLockController()
+
+        val fullLayout = controller.computeBlockerLayout(1080, 2400, null, null, 10)
+        assertTrue(fullLayout.top.isVisible)
+        assertEquals(1080, fullLayout.top.width)
+        assertEquals(2400, fullLayout.top.height)
+        assertFalse(fullLayout.bottom.isVisible)
+        assertFalse(fullLayout.left.isVisible)
+        assertFalse(fullLayout.right.isVisible)
+
+        val mouseLayout = controller.computeBlockerLayout(1080, 2400, 500, 1000, 10)
+        assertEquals(990, mouseLayout.top.height)
+        assertEquals(1010, mouseLayout.bottom.y)
+        assertEquals(1390, mouseLayout.bottom.height)
+        assertEquals(490, mouseLayout.left.width)
+        assertEquals(20, mouseLayout.left.height)
+        assertEquals(510, mouseLayout.right.x)
+        assertEquals(570, mouseLayout.right.width)
+    }
 }

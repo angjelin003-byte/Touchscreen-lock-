@@ -1,0 +1,6 @@
+{
+  "name": "TouchLock Edge — Android Gradle Project",
+  "description": "Android app repository with Gradle Wrapper (gradlew) for locking screen touch input via an edge overlay toggle button.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

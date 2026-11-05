@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TouchLock Edge</string>
+    <string name="app_subtitle">Full-screen touch blocker with an edge overlay toggle button.</string>
+
+    <string name="section_overlay_permission">1. Display Over Other Apps Permission</string>
+    <string name="permission_status_missing">Overlay permission is required to place the edge button and block screen touches.</string>
+    <string name="permission_status_granted">Overlay permission granted and ready.</string>
+    <string name="btn_grant_permission">Grant Overlay Permission</string>
+    <string name="btn_permission_granted">Overlay Permission Granted</string>
+
+    <string name="section_service_control">2. Edge Toggle Button Overlay</string>
+    <string name="service_status_stopped">Edge overlay button is currently stopped.</string>
+    <string name="service_status_active_unlocked">Edge button active on screen edge (Screen Unlocked).</string>
+    <string name="service_status_locked">Screen Touch Locked — Tap the edge button to unlock.</string>
+    <string name="btn_start_edge_overlay">Start Edge Overlay Button</string>
+    <string name="btn_stop_edge_overlay">Stop Edge Overlay Button</string>
+
+    <string name="section_edge_settings">3. Edge Button Behavior</string>
+    <string name="setting_double_tap_unlock">Require double-tap on edge button to unlock</string>
+    <string name="setting_edge_side_label">Default Screen Edge Position (also draggable vertically)</string>
+    <string name="edge_side_left">Left Edge</string>
+    <string name="edge_side_right">Right Edge</string>
+
+    <string name="edge_button_content_desc">Toggle Screen Touch Lock</string>
+    <string name="overlay_locked_activated">Touch Locked — Tap edge button to unlock</string>
+    <string name="overlay_locked_touch_hint">Screen touch is locked. Use the edge button to unlock.</string>
+    <string name="overlay_double_tap_prompt">Tap edge button once more to unlock</string>
+
+    <string name="notification_channel_name">TouchLock Edge Overlay</string>
+    <string name="notification_channel_desc">Keeps the edge toggle button and touch blocker active over other apps.</string>
+    <string name="notif_title_locked">Touch Input Locked</string>
+    <string name="notif_title_unlocked">TouchLock Edge Ready</string>
+    <string name="notif_body_locked">All screen touches blocked. Tap edge button or notification action to unlock.</string>
+    <string name="notif_body_unlocked">Edge button is docked on screen. Tap it anytime to lock screen touch.</string>
+    <string name="action_lock_touch">Lock Touch</string>
+    <string name="action_unlock_touch">Unlock Touch</string>
+    <string name="action_stop_overlay">Stop Overlay</string>
+</resources>

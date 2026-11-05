@@ -1,0 +1,24 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+.playwright-cli/
+
+# Android / Gradle build outputs
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Ensure Gradle wrapper jar is ALWAYS tracked in Git
+!gradle/wrapper/gradle-wrapper.jar
+

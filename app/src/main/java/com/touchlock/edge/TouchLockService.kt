@@ -32,10 +32,11 @@ import kotlin.math.abs
  * Foreground Service that locks touchscreen finger input while allowing wired USB-C mouse input:
  * 1. Attaches 4 invisible touch-blocker panels (Top, Bottom, Left, Right) at lower Z-order.
  *    - Totally transparent (no red border or popup when touched).
- *    - Blocks 100% of finger touches (TOOL_TYPE_FINGER).
- *    - When a wired USB-C mouse moves (SOURCE_MOUSE / TOOL_TYPE_MOUSE), dynamically positions
- *      a small pass-through aperture directly under the mouse cursor so mouse clicks, drags,
- *      and scroll wheel events pass straight through to the underlying app.
+ *    - Uses raw screen coordinates (event.rawX / event.rawY) and ignores ACTION_HOVER_EXIT
+ *      so moving the blocker panels away from the cursor never triggers a hover oscillation loop
+ *      or button selection flicker.
+ *    - Positions a generous pass-through aperture (44dp radius, biased in the movement direction)
+ *      around the mouse pointer so hover highlights and clicks on underlying buttons work reliably.
  * 2. Attaches [edgeButtonView] at higher Z-order on the screen edge so only the edge button
  *    is visible on screen to switch the touch lock ON and OFF.
  */
@@ -58,7 +59,8 @@ class TouchLockService : Service() {
 
     private var mouseCursorX: Int? = null
     private var mouseCursorY: Int? = null
-    private var lastMouseLayoutUpdateMs: Long = 0L
+    private var mouseLeadX: Int = 0
+    private var mouseLeadY: Int = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -101,20 +103,17 @@ class TouchLockService : Service() {
         when (intent?.action) {
             ACTION_TOGGLE_LOCK -> {
                 controller.setLockedState(!controller.isTouchLocked)
-                mouseCursorX = null
-                mouseCursorY = null
+                resetMouseApertureState()
                 syncOverlayState()
             }
             ACTION_LOCK_NOW -> {
                 controller.setLockedState(true)
-                mouseCursorX = null
-                mouseCursorY = null
+                resetMouseApertureState()
                 syncOverlayState()
             }
             ACTION_UNLOCK_NOW -> {
                 controller.setLockedState(false)
-                mouseCursorX = null
-                mouseCursorY = null
+                resetMouseApertureState()
                 syncOverlayState()
             }
             ACTION_STOP_SERVICE -> {
@@ -157,7 +156,6 @@ class TouchLockService : Service() {
         if (blockerPanels.isNotEmpty() || edgeButtonView != null) return
 
         // 1. Create and attach 4 completely invisible touch-blocker panels FIRST (lower Z-order)
-        //    so they block touchscreen fingers while allowing a pass-through aperture for a USB-C mouse.
         repeat(4) {
             val panelView = View(this).apply {
                 setBackgroundColor(Color.TRANSPARENT)
@@ -237,44 +235,60 @@ class TouchLockService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupBlockerPanelListeners(panel: BlockerPanel) {
-        // USB-C mouse hover / scroll events update the pass-through aperture around the mouse cursor
+        // IMPORTANT:
+        // 1. Only process ACTION_HOVER_ENTER and ACTION_HOVER_MOVE. Never react to ACTION_HOVER_EXIT,
+        //    which Android synthesizes when the blocker panel moves out from under the cursor.
+        // 2. Always use event.rawX and event.rawY (absolute screen coordinates) so layout updates
+        //    never offset subsequent event coordinates.
+        // 3. Return true when handled so the event does not fall through to onGenericMotionListener.
         panel.view.setOnHoverListener { _, event ->
-            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = false)
+            if (!controller.isTouchLocked || !isUsbMouseEvent(event)) {
+                return@setOnHoverListener false
             }
-            false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER,
+                MotionEvent.ACTION_HOVER_MOVE -> {
+                    updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
+                    true
+                }
+                MotionEvent.ACTION_HOVER_EXIT -> {
+                    // Ignore synthetic hover exit when the panel moves away to expose the app below
+                    true
+                }
+                else -> false
+            }
         }
 
         panel.view.setOnGenericMotionListener { _, event ->
-            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = true)
+            if (!controller.isTouchLocked || !isUsbMouseEvent(event)) {
+                return@setOnGenericMotionListener false
             }
-            false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_SCROLL,
+                MotionEvent.ACTION_BUTTON_PRESS -> {
+                    updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
+                    false
+                }
+                else -> false
+            }
         }
 
         // Touch / button events:
-        // - If from a USB-C mouse, open the aperture at the mouse pointer so clicks/drags reach the app below.
-        // - If from a finger (touchscreen), silently consume and block the touch with zero visual flash.
+        // - If from a USB-C mouse, open the aperture at rawX/rawY so clicks reach the app below.
+        // - If from a finger (touchscreen), close the aperture and consume the touch silently.
         panel.view.setOnTouchListener { _, event ->
             if (!controller.isTouchLocked) {
                 return@setOnTouchListener false
             }
 
             if (isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = true)
+                updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
                 return@setOnTouchListener false
             }
 
             // Finger touch: close any open mouse aperture and consume the touch event silently
             if (mouseCursorX != null || mouseCursorY != null) {
-                mouseCursorX = null
-                mouseCursorY = null
+                resetMouseApertureState()
                 applyBlockerPanelsLayout()
             }
             true
@@ -300,24 +314,33 @@ class TouchLockService : Service() {
         return false
     }
 
-    private fun updateMouseAperture(mx: Int, my: Int, force: Boolean) {
-        val now = SystemClock.uptimeMillis()
+    private fun updateMouseApertureFromRaw(rawX: Int, rawY: Int) {
         val prevX = mouseCursorX
         val prevY = mouseCursorY
 
-        if (!force && prevX != null && prevY != null) {
-            if (abs(mx - prevX) < 3 && abs(my - prevY) < 3) {
+        if (prevX != null && prevY != null) {
+            val dx = rawX - prevX
+            val dy = rawY - prevY
+            if (abs(dx) < 2 && abs(dy) < 2) {
                 return
             }
-            if (now - lastMouseLayoutUpdateMs < 14L) {
-                return
-            }
+            mouseLeadX = dx
+            mouseLeadY = dy
+        } else {
+            mouseLeadX = 0
+            mouseLeadY = 0
         }
 
-        mouseCursorX = mx
-        mouseCursorY = my
-        lastMouseLayoutUpdateMs = now
+        mouseCursorX = rawX
+        mouseCursorY = rawY
         applyBlockerPanelsLayout()
+    }
+
+    private fun resetMouseApertureState() {
+        mouseCursorX = null
+        mouseCursorY = null
+        mouseLeadX = 0
+        mouseLeadY = 0
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -380,8 +403,7 @@ class TouchLockService : Service() {
         if (outcome == TouchLockController.ToggleOutcome.LOCKED ||
             outcome == TouchLockController.ToggleOutcome.UNLOCKED
         ) {
-            mouseCursorX = null
-            mouseCursorY = null
+            resetMouseApertureState()
             syncOverlayState()
         }
     }
@@ -411,12 +433,15 @@ class TouchLockService : Service() {
         }
 
         val (screenW, screenH) = getFullScreenSize()
+        val radiusPx = dpToPx(44).coerceAtLeast(64)
         val layout = controller.computeBlockerLayout(
             screenWidthPx = screenW,
             screenHeightPx = screenH,
             mouseX = mouseCursorX,
             mouseY = mouseCursorY,
-            apertureRadiusPx = dpToPx(8).coerceAtLeast(8)
+            apertureRadiusPx = radiusPx,
+            leadX = mouseLeadX,
+            leadY = mouseLeadY
         )
 
         val rects = listOf(layout.top, layout.bottom, layout.left, layout.right)

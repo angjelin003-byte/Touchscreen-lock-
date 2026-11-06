@@ -62,26 +62,41 @@ class TouchLockService : Service() {
 
     private var mouseCursorX: Int? = null
     private var mouseCursorY: Int? = null
-    private var lastMouseLayoutUpdateMs: Long = 0L
+    private var mouseLeadX: Int = 0
+    private var mouseLeadY: Int = 0
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupBlockerPanelListeners(panel: BlockerPanel) {
         panel.view.setOnHoverListener { _, event ->
-            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = false)
+            if (!controller.isTouchLocked || !isUsbMouseEvent(event)) {
+                return@setOnHoverListener false
             }
-            false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER,
+                MotionEvent.ACTION_HOVER_MOVE -> {
+                    updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
+                    true
+                }
+                MotionEvent.ACTION_HOVER_EXIT -> {
+                    // Ignore synthetic hover exit when the panel moves away to expose the app below
+                    true
+                }
+                else -> false
+            }
         }
 
         panel.view.setOnGenericMotionListener { _, event ->
-            if (controller.isTouchLocked && isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = true)
+            if (!controller.isTouchLocked || !isUsbMouseEvent(event)) {
+                return@setOnGenericMotionListener false
             }
-            false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_SCROLL,
+                MotionEvent.ACTION_BUTTON_PRESS -> {
+                    updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
+                    false
+                }
+                else -> false
+            }
         }
 
         panel.view.setOnTouchListener { _, event ->
@@ -90,16 +105,13 @@ class TouchLockService : Service() {
             }
 
             if (isUsbMouseEvent(event)) {
-                val mx = (panel.params.x + event.x).toInt()
-                val my = (panel.params.y + event.y).toInt()
-                updateMouseAperture(mx, my, force = true)
+                updateMouseApertureFromRaw(event.rawX.toInt(), event.rawY.toInt())
                 return@setOnTouchListener false
             }
 
             // Finger touch: close any open mouse aperture and consume the touch event silently
             if (mouseCursorX != null || mouseCursorY != null) {
-                mouseCursorX = null
-                mouseCursorY = null
+                resetMouseApertureState()
                 applyBlockerPanelsLayout()
             }
             true
@@ -173,7 +185,9 @@ class TouchLockController(
         screenHeightPx: Int,
         mouseX: Int?,
         mouseY: Int?,
-        apertureRadiusPx: Int = DEFAULT_MOUSE_APERTURE_RADIUS_PX
+        apertureRadiusPx: Int = DEFAULT_MOUSE_APERTURE_RADIUS_PX,
+        leadX: Int = 0,
+        leadY: Int = 0
     ): BlockerOverlayLayout {
         val w = screenWidthPx.coerceAtLeast(1)
         val h = screenHeightPx.coerceAtLeast(1)
@@ -187,13 +201,14 @@ class TouchLockController(
             )
         }
 
-        val mx = mouseX.coerceIn(0, w)
-        val my = mouseY.coerceIn(0, h)
+        val maxLead = (apertureRadiusPx / 2).coerceAtLeast(0)
+        val cx = (mouseX + leadX.coerceIn(-maxLead, maxLead)).coerceIn(0, w)
+        val cy = (mouseY + leadY.coerceIn(-maxLead, maxLead)).coerceIn(0, h)
 
-        val holeLeft = (mx - apertureRadiusPx).coerceIn(0, w)
-        val holeRight = (mx + apertureRadiusPx).coerceIn(0, w)
-        val holeTop = (my - apertureRadiusPx).coerceIn(0, h)
-        val holeBottom = (my + apertureRadiusPx).coerceIn(0, h)
+        val holeLeft = (cx - apertureRadiusPx).coerceIn(0, w)
+        val holeRight = (cx + apertureRadiusPx).coerceIn(0, w)
+        val holeTop = (cy - apertureRadiusPx).coerceIn(0, h)
+        val holeBottom = (cy + apertureRadiusPx).coerceIn(0, h)
         val middleHeight = (holeBottom - holeTop).coerceAtLeast(0)
 
         return BlockerOverlayLayout(
@@ -206,7 +221,7 @@ class TouchLockController(
 
     companion object {
         const val DOUBLE_TAP_WINDOW_MS = 650L
-        const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 10
+        const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 96
     }
 }`
   },

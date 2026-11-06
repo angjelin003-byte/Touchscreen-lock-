@@ -4,7 +4,7 @@ package com.touchlock.edge
  * Pure controller logic for managing the screen touch lock state,
  * single/double-tap unlock guard, edge button docking coordinates,
  * and 4-panel touch-blocker geometry that blocks finger touch while leaving
- * a pass-through aperture under a wired USB-C mouse cursor.
+ * a stable, flicker-free pass-through aperture under a wired USB-C mouse cursor.
  */
 class TouchLockController(
     initialLocked: Boolean = false,
@@ -84,17 +84,19 @@ class TouchLockController(
     }
 
     /**
-     * Computes 4 non-overlapping touch-blocking rectangles covering the entire screen
-     * except for a small pass-through aperture centered at the USB-C mouse cursor (mouseX, mouseY).
-     * When mouseX or mouseY is null (e.g., no mouse active or finger touched screen), the top panel
-     * covers 100% of the screen.
+     * Computes 4 non-overlapping touch-blocking rectangles covering the screen
+     * except for a generous pass-through aperture around the USB-C mouse cursor (mouseX, mouseY),
+     * optionally biased by (leadX, leadY) in the direction of mouse movement so the cursor
+     * stays well inside the open zone without hover-exit flicker or dropped clicks.
      */
     fun computeBlockerLayout(
         screenWidthPx: Int,
         screenHeightPx: Int,
         mouseX: Int?,
         mouseY: Int?,
-        apertureRadiusPx: Int = DEFAULT_MOUSE_APERTURE_RADIUS_PX
+        apertureRadiusPx: Int = DEFAULT_MOUSE_APERTURE_RADIUS_PX,
+        leadX: Int = 0,
+        leadY: Int = 0
     ): BlockerOverlayLayout {
         val w = screenWidthPx.coerceAtLeast(1)
         val h = screenHeightPx.coerceAtLeast(1)
@@ -108,13 +110,14 @@ class TouchLockController(
             )
         }
 
-        val mx = mouseX.coerceIn(0, w)
-        val my = mouseY.coerceIn(0, h)
+        val maxLead = (apertureRadiusPx / 2).coerceAtLeast(0)
+        val cx = (mouseX + leadX.coerceIn(-maxLead, maxLead)).coerceIn(0, w)
+        val cy = (mouseY + leadY.coerceIn(-maxLead, maxLead)).coerceIn(0, h)
 
-        val holeLeft = (mx - apertureRadiusPx).coerceIn(0, w)
-        val holeRight = (mx + apertureRadiusPx).coerceIn(0, w)
-        val holeTop = (my - apertureRadiusPx).coerceIn(0, h)
-        val holeBottom = (my + apertureRadiusPx).coerceIn(0, h)
+        val holeLeft = (cx - apertureRadiusPx).coerceIn(0, w)
+        val holeRight = (cx + apertureRadiusPx).coerceIn(0, w)
+        val holeTop = (cy - apertureRadiusPx).coerceIn(0, h)
+        val holeBottom = (cy + apertureRadiusPx).coerceIn(0, h)
         val middleHeight = (holeBottom - holeTop).coerceAtLeast(0)
 
         return BlockerOverlayLayout(
@@ -127,6 +130,6 @@ class TouchLockController(
 
     companion object {
         const val DOUBLE_TAP_WINDOW_MS = 650L
-        const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 10
+        const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 96
     }
 }

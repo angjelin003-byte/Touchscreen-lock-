@@ -65,7 +65,7 @@ class TouchLockControllerTest {
     fun blockerLayoutCoversFullScreenWhenNoMouseOrCreatesApertureForUsbMouse() {
         val controller = TouchLockController()
 
-        val fullLayout = controller.computeBlockerLayout(1080, 2400, null, null, 10)
+        val fullLayout = controller.computeBlockerLayout(1080, 2400, null, null, 100)
         assertTrue(fullLayout.top.isVisible)
         assertEquals(1080, fullLayout.top.width)
         assertEquals(2400, fullLayout.top.height)
@@ -73,13 +73,22 @@ class TouchLockControllerTest {
         assertFalse(fullLayout.left.isVisible)
         assertFalse(fullLayout.right.isVisible)
 
-        val mouseLayout = controller.computeBlockerLayout(1080, 2400, 500, 1000, 10)
-        assertEquals(990, mouseLayout.top.height)
-        assertEquals(1010, mouseLayout.bottom.y)
-        assertEquals(1390, mouseLayout.bottom.height)
-        assertEquals(490, mouseLayout.left.width)
-        assertEquals(20, mouseLayout.left.height)
-        assertEquals(510, mouseLayout.right.x)
-        assertEquals(570, mouseLayout.right.width)
+        val mouseLayout = controller.computeBlockerLayout(
+            screenWidthPx = 1080,
+            screenHeightPx = 2400,
+            mouseX = 500,
+            mouseY = 1000,
+            apertureRadiusPx = 100,
+            leadX = 20,
+            leadY = -10
+        )
+        // Center biased to (520, 990) with radius 100 -> hole [420, 620] x [890, 1090]
+        assertEquals(890, mouseLayout.top.height)
+        assertEquals(1090, mouseLayout.bottom.y)
+        assertEquals(1310, mouseLayout.bottom.height)
+        assertEquals(420, mouseLayout.left.width)
+        assertEquals(200, mouseLayout.left.height)
+        assertEquals(620, mouseLayout.right.x)
+        assertEquals(460, mouseLayout.right.width)
     }
 }

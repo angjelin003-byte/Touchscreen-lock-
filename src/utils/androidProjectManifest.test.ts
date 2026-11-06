@@ -40,7 +40,7 @@ test('AndroidManifest.xml declares SYSTEM_ALERT_WINDOW and TouchLockService', ()
   assert.equal(manifestXml.includes('.TouchLockService'), true);
 });
 
-test('TouchLockService.kt removes red border indicator and supports flicker-free USB-C mouse pass-through', () => {
+test('TouchLockService.kt removes red border indicator and supports flicker-free USB-C mouse pass-through and overlay editor', () => {
   const serviceCode = fs.readFileSync(
     'app/src/main/java/com/touchlock/edge/TouchLockService.kt',
     'utf8'
@@ -51,6 +51,11 @@ test('TouchLockService.kt removes red border indicator and supports flicker-free
   assert.equal(serviceCode.includes('ACTION_HOVER_EXIT'), true);
   assert.equal(serviceCode.includes('event.rawX'), true);
   assert.equal(serviceCode.includes('panel.params.x + event.x'), false);
+  assert.equal(serviceCode.includes('KEY_ICON_SIZE_DP'), true);
+  assert.equal(serviceCode.includes('KEY_OPACITY_PERCENT'), true);
+
+  const themesXml = fs.readFileSync('app/src/main/res/values/themes.xml', 'utf8');
+  assert.equal(themesXml.includes('android:windowIsTranslucent">true<'), true);
 });
 
 test('filterRepoFiles filters by category and search query accurately', () => {

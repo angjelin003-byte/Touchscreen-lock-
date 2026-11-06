@@ -3,6 +3,7 @@ package com.touchlock.edge
 /**
  * Pure controller logic for managing the screen touch lock state,
  * single/double-tap unlock guard, edge button docking coordinates,
+ * overlay editor appearance settings (size, opacity, corner radius, status dot),
  * and 4-panel touch-blocker geometry that blocks finger touch while leaving
  * a stable, flicker-free pass-through aperture under a wired USB-C mouse cursor.
  */
@@ -10,7 +11,12 @@ class TouchLockController(
     initialLocked: Boolean = false,
     var requireDoubleTapToUnlock: Boolean = false,
     var dockedLeftEdge: Boolean = false,
-    var yOffsetPx: Int = 420
+    var yOffsetPx: Int = 420,
+    var iconSizeDp: Int = DEFAULT_ICON_SIZE_DP,
+    var overlayOpacityPercent: Int = DEFAULT_OPACITY_PERCENT,
+    var cornerRadiusDp: Int = DEFAULT_CORNER_RADIUS_DP,
+    var showStatusDot: Boolean = DEFAULT_SHOW_STATUS_DOT,
+    var mouseApertureDp: Int = DEFAULT_MOUSE_APERTURE_DP
 ) {
     enum class ToggleOutcome {
         LOCKED,
@@ -33,6 +39,15 @@ class TouchLockController(
         val bottom: PanelRect,
         val left: PanelRect,
         val right: PanelRect
+    )
+
+    data class OverlayStyleMetrics(
+        val iconSizeDp: Int,
+        val horizontalPaddingDp: Int,
+        val verticalPaddingDp: Int,
+        val cornerRadiusDp: Int,
+        val alpha: Float,
+        val showStatusDot: Boolean
     )
 
     var isTouchLocked: Boolean = initialLocked
@@ -83,6 +98,23 @@ class TouchLockController(
         return dockedLeftEdge
     }
 
+    fun computeOverlayStyle(): OverlayStyleMetrics {
+        val clampedIconDp = iconSizeDp.coerceIn(MIN_ICON_SIZE_DP, MAX_ICON_SIZE_DP)
+        val clampedOpacity = overlayOpacityPercent.coerceIn(MIN_OPACITY_PERCENT, MAX_OPACITY_PERCENT)
+        val clampedCornerDp = cornerRadiusDp.coerceIn(MIN_CORNER_RADIUS_DP, MAX_CORNER_RADIUS_DP)
+        val hPadDp = (clampedIconDp * 0.42f).toInt().coerceAtLeast(5)
+        val vPadDp = (clampedIconDp * 0.50f).toInt().coerceAtLeast(6)
+
+        return OverlayStyleMetrics(
+            iconSizeDp = clampedIconDp,
+            horizontalPaddingDp = hPadDp,
+            verticalPaddingDp = vPadDp,
+            cornerRadiusDp = clampedCornerDp,
+            alpha = clampedOpacity / 100f,
+            showStatusDot = showStatusDot
+        )
+    }
+
     /**
      * Computes 4 non-overlapping touch-blocking rectangles covering the screen
      * except for a generous pass-through aperture around the USB-C mouse cursor (mouseX, mouseY),
@@ -131,5 +163,23 @@ class TouchLockController(
     companion object {
         const val DOUBLE_TAP_WINDOW_MS = 650L
         const val DEFAULT_MOUSE_APERTURE_RADIUS_PX = 96
+
+        const val MIN_ICON_SIZE_DP = 10
+        const val MAX_ICON_SIZE_DP = 28
+        const val DEFAULT_ICON_SIZE_DP = 14
+
+        const val MIN_OPACITY_PERCENT = 15
+        const val MAX_OPACITY_PERCENT = 100
+        const val DEFAULT_OPACITY_PERCENT = 45
+
+        const val MIN_CORNER_RADIUS_DP = 4
+        const val MAX_CORNER_RADIUS_DP = 24
+        const val DEFAULT_CORNER_RADIUS_DP = 12
+
+        const val DEFAULT_SHOW_STATUS_DOT = false
+
+        const val MIN_MOUSE_APERTURE_DP = 24
+        const val MAX_MOUSE_APERTURE_DP = 80
+        const val DEFAULT_MOUSE_APERTURE_DP = 44
     }
 }

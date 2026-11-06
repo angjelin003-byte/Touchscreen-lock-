@@ -62,6 +62,26 @@ class TouchLockControllerTest {
     }
 
     @Test
+    fun overlayStyleMetricsClampAndComputeSmallerTranslucentDefaults() {
+        val controller = TouchLockController()
+        val defaultStyle = controller.computeOverlayStyle()
+        assertEquals(14, defaultStyle.iconSizeDp)
+        assertEquals(0.45f, defaultStyle.alpha, 0.001f)
+        assertEquals(12, defaultStyle.cornerRadiusDp)
+        assertFalse(defaultStyle.showStatusDot)
+
+        controller.iconSizeDp = 4
+        controller.overlayOpacityPercent = 5
+        controller.cornerRadiusDp = 99
+        controller.showStatusDot = true
+        val clampedStyle = controller.computeOverlayStyle()
+        assertEquals(TouchLockController.MIN_ICON_SIZE_DP, clampedStyle.iconSizeDp)
+        assertEquals(0.15f, clampedStyle.alpha, 0.001f)
+        assertEquals(TouchLockController.MAX_CORNER_RADIUS_DP, clampedStyle.cornerRadiusDp)
+        assertTrue(clampedStyle.showStatusDot)
+    }
+
+    @Test
     fun blockerLayoutCoversFullScreenWhenNoMouseOrCreatesApertureForUsbMouse() {
         val controller = TouchLockController()
 

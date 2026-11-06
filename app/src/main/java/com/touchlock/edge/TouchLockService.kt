@@ -8,6 +8,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -29,16 +30,9 @@ import androidx.core.app.NotificationCompat
 import kotlin.math.abs
 
 /**
- * Foreground Service that locks touchscreen finger input while allowing wired USB-C mouse input:
- * 1. Attaches 4 invisible touch-blocker panels (Top, Bottom, Left, Right) at lower Z-order.
- *    - Totally transparent (no red border or popup when touched).
- *    - Uses raw screen coordinates (event.rawX / event.rawY) and ignores ACTION_HOVER_EXIT
- *      so moving the blocker panels away from the cursor never triggers a hover oscillation loop
- *      or button selection flicker.
- *    - Positions a generous pass-through aperture (44dp radius, biased in the movement direction)
- *      around the mouse pointer so hover highlights and clicks on underlying buttons work reliably.
- * 2. Attaches [edgeButtonView] at higher Z-order on the screen edge so only the edge button
- *    is visible on screen to switch the touch lock ON and OFF.
+ * Foreground Service that locks touchscreen finger input while allowing wired USB-C mouse input,
+ * and renders a compact, translucent edge lock button whose size, transparency, corner radius,
+ * status dot, and edge side update in real time from the in-app Overlay Editor.
  */
 class TouchLockService : Service() {
 
@@ -48,6 +42,7 @@ class TouchLockService : Service() {
     )
 
     private lateinit var windowManager: WindowManager
+    private lateinit var prefs: SharedPreferences
     private lateinit var controller: TouchLockController
 
     private val blockerPanels = mutableListOf<BlockerPanel>()
@@ -62,17 +57,26 @@ class TouchLockService : Service() {
     private var mouseLeadX: Int = 0
     private var mouseLeadY: Int = 0
 
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { sharedPrefs, key ->
+        if (key == KEY_SERVICE_RUNNING || key == KEY_IS_LOCKED) return@OnSharedPreferenceChangeListener
+        loadConfigFromPrefs(sharedPrefs)
+        applyEdgeButtonLayout()
+        if (controller.isTouchLocked) {
+            applyBlockerPanelsLayout()
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         controller = TouchLockController(
             initialLocked = false,
-            requireDoubleTapToUnlock = prefs.getBoolean(KEY_DOUBLE_TAP_UNLOCK, false),
-            dockedLeftEdge = prefs.getBoolean(KEY_DOCKED_LEFT, false),
             yOffsetPx = prefs.getInt(KEY_Y_OFFSET_PX, dpToPx(220))
         )
+        loadConfigFromPrefs(prefs)
+        prefs.registerOnSharedPreferenceChangeListener(prefsListener)
 
         createNotificationChannel()
         startServiceForeground()
@@ -92,13 +96,8 @@ class TouchLockService : Service() {
             return START_NOT_STICKY
         }
 
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        controller.requireDoubleTapToUnlock = prefs.getBoolean(KEY_DOUBLE_TAP_UNLOCK, false)
-        val prefLeft = prefs.getBoolean(KEY_DOCKED_LEFT, controller.dockedLeftEdge)
-        if (prefLeft != controller.dockedLeftEdge) {
-            controller.dockedLeftEdge = prefLeft
-            applyEdgeButtonLayout()
-        }
+        loadConfigFromPrefs(prefs)
+        applyEdgeButtonLayout()
 
         when (intent?.action) {
             ACTION_TOGGLE_LOCK -> {
@@ -131,12 +130,38 @@ class TouchLockService : Service() {
     }
 
     override fun onDestroy() {
+        prefs.unregisterOnSharedPreferenceChangeListener(prefsListener)
         removeOverlays()
         setServiceRunningState(false)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun loadConfigFromPrefs(sharedPrefs: SharedPreferences) {
+        controller.requireDoubleTapToUnlock = sharedPrefs.getBoolean(KEY_DOUBLE_TAP_UNLOCK, false)
+        controller.dockedLeftEdge = sharedPrefs.getBoolean(KEY_DOCKED_LEFT, false)
+        controller.iconSizeDp = sharedPrefs.getInt(
+            KEY_ICON_SIZE_DP,
+            TouchLockController.DEFAULT_ICON_SIZE_DP
+        )
+        controller.overlayOpacityPercent = sharedPrefs.getInt(
+            KEY_OPACITY_PERCENT,
+            TouchLockController.DEFAULT_OPACITY_PERCENT
+        )
+        controller.cornerRadiusDp = sharedPrefs.getInt(
+            KEY_CORNER_RADIUS_DP,
+            TouchLockController.DEFAULT_CORNER_RADIUS_DP
+        )
+        controller.showStatusDot = sharedPrefs.getBoolean(
+            KEY_SHOW_STATUS_DOT,
+            TouchLockController.DEFAULT_SHOW_STATUS_DOT
+        )
+        controller.mouseApertureDp = sharedPrefs.getInt(
+            KEY_MOUSE_APERTURE_DP,
+            TouchLockController.DEFAULT_MOUSE_APERTURE_DP
+        )
+    }
 
     private fun startServiceForeground() {
         val notification = buildNotification()
@@ -184,28 +209,37 @@ class TouchLockService : Service() {
             blockerPanels.add(panel)
         }
 
-        // 2. Create and attach the Edge Toggle Button SECOND (higher Z-order, always above blocker panels)
+        // 2. Create and attach the compact, translucent Edge Toggle Button SECOND (higher Z-order)
+        val style = controller.computeOverlayStyle()
         val edgeContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dpToPx(10), dpToPx(12), dpToPx(10), dpToPx(12))
-            elevation = dpToPx(8).toFloat()
+            setPadding(
+                dpToPx(style.horizontalPaddingDp),
+                dpToPx(style.verticalPaddingDp),
+                dpToPx(style.horizontalPaddingDp),
+                dpToPx(style.verticalPaddingDp)
+            )
+            alpha = style.alpha
+            elevation = dpToPx(4).toFloat()
         }
 
+        val iconPx = dpToPx(style.iconSizeDp)
         val iconView = ImageView(this).apply {
             setImageResource(R.drawable.ic_lock_open)
             contentDescription = getString(R.string.edge_button_content_desc)
         }
-        edgeContainer.addView(iconView, LinearLayout.LayoutParams(dpToPx(22), dpToPx(22)))
+        edgeContainer.addView(iconView, LinearLayout.LayoutParams(iconPx, iconPx))
 
         val statusDot = View(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#10B981"))
+                setColor(Color.parseColor("#34C759"))
             }
+            visibility = if (style.showStatusDot) View.VISIBLE else View.GONE
         }
-        val dotParams = LinearLayout.LayoutParams(dpToPx(6), dpToPx(6)).apply {
-            topMargin = dpToPx(6)
+        val dotParams = LinearLayout.LayoutParams(dpToPx(4), dpToPx(4)).apply {
+            topMargin = dpToPx(4)
         }
         edgeContainer.addView(statusDot, dotParams)
 
@@ -373,7 +407,7 @@ class TouchLockService : Service() {
                         val updatedY = controller.updateVerticalPosition(
                             rawY = (initialY + dy).toInt(),
                             screenHeightPx = screenH,
-                            buttonHeightPx = view.height.coerceAtLeast(dpToPx(52))
+                            buttonHeightPx = view.height.coerceAtLeast(dpToPx(32))
                         )
                         params.y = updatedY
                         windowManager.updateViewLayout(view, params)
@@ -433,7 +467,13 @@ class TouchLockService : Service() {
         }
 
         val (screenW, screenH) = getFullScreenSize()
-        val radiusPx = dpToPx(44).coerceAtLeast(64)
+        val radiusPx = dpToPx(
+            controller.mouseApertureDp.coerceIn(
+                TouchLockController.MIN_MOUSE_APERTURE_DP,
+                TouchLockController.MAX_MOUSE_APERTURE_DP
+            )
+        ).coerceAtLeast(48)
+
         val layout = controller.computeBlockerLayout(
             screenWidthPx = screenW,
             screenHeightPx = screenH,
@@ -493,9 +533,29 @@ class TouchLockService : Service() {
         val edge = edgeButtonView ?: return
         val locked = controller.isTouchLocked
         val onLeft = controller.dockedLeftEdge
-        val r = dpToPx(16).toFloat()
+        val style = controller.computeOverlayStyle()
 
-        // Round the inner screen-facing corners while keeping the outer screen-edge flush
+        edge.setPadding(
+            dpToPx(style.horizontalPaddingDp),
+            dpToPx(style.verticalPaddingDp),
+            dpToPx(style.horizontalPaddingDp),
+            dpToPx(style.verticalPaddingDp)
+        )
+        edge.alpha = style.alpha
+
+        val iconPx = dpToPx(style.iconSizeDp)
+        edgeIconView?.let { icon ->
+            val lp = icon.layoutParams as? LinearLayout.LayoutParams
+                ?: LinearLayout.LayoutParams(iconPx, iconPx)
+            lp.width = iconPx
+            lp.height = iconPx
+            icon.layoutParams = lp
+            icon.setImageResource(
+                if (locked) R.drawable.ic_lock_closed else R.drawable.ic_lock_open
+            )
+        }
+
+        val r = dpToPx(style.cornerRadiusDp).toFloat()
         val radii = if (onLeft) {
             floatArrayOf(0f, 0f, r, r, r, r, 0f, 0f)
         } else {
@@ -505,24 +565,23 @@ class TouchLockService : Service() {
         val bgDrawable = GradientDrawable().apply {
             cornerRadii = radii
             if (locked) {
-                setColor(Color.parseColor("#E6111827"))
-                setStroke(dpToPx(2), Color.parseColor("#EF4444"))
+                setColor(Color.parseColor("#CC1C1C1E"))
+                setStroke(dpToPx(1), Color.parseColor("#FF453A"))
             } else {
-                setColor(Color.parseColor("#CC1F2937"))
-                setStroke(dpToPx(1), Color.parseColor("#10B981"))
+                setColor(Color.parseColor("#B31C1C1E"))
+                setStroke(dpToPx(1), Color.parseColor("#4DFFFFFF"))
             }
         }
         edge.background = bgDrawable
 
-        edgeIconView?.setImageResource(
-            if (locked) R.drawable.ic_lock_closed else R.drawable.ic_lock_open
-        )
-
-        val dotDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(if (locked) Color.parseColor("#EF4444") else Color.parseColor("#10B981"))
+        edgeStatusDot?.let { dot ->
+            dot.visibility = if (style.showStatusDot) View.VISIBLE else View.GONE
+            val dotDrawable = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(if (locked) Color.parseColor("#FF453A") else Color.parseColor("#34C759"))
+            }
+            dot.background = dotDrawable
         }
-        edgeStatusDot?.background = dotDrawable
     }
 
     private fun removeOverlays() {
@@ -538,30 +597,26 @@ class TouchLockService : Service() {
     }
 
     private fun lockedBlockerFlags(): Int {
-        // Intercepts touch events while keeping the blocker completely invisible
         return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
     }
 
     private fun unlockedBlockerFlags(): Int {
-        // Passes 100% of events straight through to underlying apps
         return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
     }
 
     private fun persistEdgePreferences() {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
+        prefs.edit()
             .putBoolean(KEY_DOCKED_LEFT, controller.dockedLeftEdge)
             .putInt(KEY_Y_OFFSET_PX, controller.yOffsetPx)
             .apply()
     }
 
     private fun setServiceRunningState(running: Boolean) {
-        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
+        prefs.edit()
             .putBoolean(KEY_SERVICE_RUNNING, running)
             .putBoolean(KEY_IS_LOCKED, running && controller.isTouchLocked)
             .apply()
@@ -655,6 +710,12 @@ class TouchLockService : Service() {
         const val KEY_DOCKED_LEFT = "docked_left"
         const val KEY_Y_OFFSET_PX = "y_offset_px"
         const val KEY_DOUBLE_TAP_UNLOCK = "double_tap_unlock"
+
+        const val KEY_ICON_SIZE_DP = "icon_size_dp"
+        const val KEY_OPACITY_PERCENT = "opacity_percent"
+        const val KEY_CORNER_RADIUS_DP = "corner_radius_dp"
+        const val KEY_SHOW_STATUS_DOT = "show_status_dot"
+        const val KEY_MOUSE_APERTURE_DP = "mouse_aperture_dp"
 
         const val ACTION_TOGGLE_LOCK = "com.touchlock.edge.ACTION_TOGGLE_LOCK"
         const val ACTION_LOCK_NOW = "com.touchlock.edge.ACTION_LOCK_NOW"

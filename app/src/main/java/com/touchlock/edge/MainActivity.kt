@@ -1,15 +1,12 @@
 package com.touchlock.edge
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.SeekBar
@@ -34,14 +31,8 @@ class MainActivity : AppCompatActivity() {
     ) {
         refreshUiState()
         if (Settings.canDrawOverlays(this)) {
-            startOverlayService()
+            startOverlayServiceInternal()
         }
-    }
-
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) {
-        startOverlayServiceInternal()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -250,18 +241,6 @@ class MainActivity : AppCompatActivity() {
             requestOverlayPermission()
             return
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                return
-            }
-        }
-
         startOverlayServiceInternal()
     }
 

@@ -284,7 +284,7 @@ class MainActivity : AppCompatActivity() {
     category: 'manifest-res',
     language: 'xml',
     summary:
-      'Declares SYSTEM_ALERT_WINDOW, FOREGROUND_SERVICE, FOREGROUND_SERVICE_SPECIAL_USE, MainActivity, and TouchLockService.',
+      'Declares SYSTEM_ALERT_WINDOW and TouchLockService with allowBackup="false", data_extraction_rules blocking cloud/transfer extraction, and AndroidX profile/telemetry collectors removed.',
     content: `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
@@ -292,10 +292,11 @@ class MainActivity : AppCompatActivity() {
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupOnly="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -305,6 +306,7 @@ class MainActivity : AppCompatActivity() {
 
         <activity
             android:name=".MainActivity"
+            android:excludeFromRecents="true"
             android:exported="true"
             android:launchMode="singleTop">
             <intent-filter>
@@ -320,8 +322,17 @@ class MainActivity : AppCompatActivity() {
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Provides an edge-docked toggle button and full-screen touch blocker overlay to lock screen touch input on demand." />
+                android:value="Provides a local edge toggle button and touch blocker overlay." />
         </service>
+
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="\${applicationId}.androidx-startup"
+            tools:node="remove" />
+
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:node="remove" />
 
     </application>
 </manifest>`
@@ -331,7 +342,7 @@ class MainActivity : AppCompatActivity() {
     category: 'gradle',
     language: 'kotlin',
     summary:
-      'Module-level Gradle build script configuring namespace com.touchlock.edge, SDK 26..35, Java 17, and ViewBinding.',
+      'Module-level Gradle build script configuring namespace com.touchlock.edge, SDK 26..35, Java 17, ViewBinding, and disabling APK dependenciesInfo telemetry.',
     content: `plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -347,8 +358,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+    }
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     compileOptions {
@@ -362,6 +376,7 @@ android {
 
     buildFeatures {
         viewBinding = true
+        buildConfig = false
     }
 }
 

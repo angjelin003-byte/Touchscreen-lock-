@@ -33,11 +33,19 @@ test('all required Android Gradle Wrapper and source files exist on disk', () =>
   assert.equal(jarStat.size > 30000, true, 'gradle-wrapper.jar should be a valid non-empty binary JAR');
 });
 
-test('AndroidManifest.xml declares SYSTEM_ALERT_WINDOW and TouchLockService', () => {
+test('AndroidManifest.xml and build.gradle.kts disable data backup, extraction, and telemetry', () => {
   const manifestXml = fs.readFileSync('app/src/main/AndroidManifest.xml', 'utf8');
   assert.equal(manifestXml.includes('android.permission.SYSTEM_ALERT_WINDOW'), true);
   assert.equal(manifestXml.includes('android.permission.FOREGROUND_SERVICE_SPECIAL_USE'), true);
+  assert.equal(manifestXml.includes('android.permission.POST_NOTIFICATIONS'), false);
+  assert.equal(manifestXml.includes('android:allowBackup="false"'), true);
+  assert.equal(manifestXml.includes('androidx.profileinstaller.ProfileInstallReceiver'), true);
+  assert.equal(manifestXml.includes('tools:node="remove"'), true);
   assert.equal(manifestXml.includes('.TouchLockService'), true);
+
+  const buildGradle = fs.readFileSync('app/build.gradle.kts', 'utf8');
+  assert.equal(buildGradle.includes('includeInApk = false'), true);
+  assert.equal(fs.existsSync('app/src/main/res/xml/data_extraction_rules.xml'), true);
 });
 
 test('TouchLockService.kt removes red border indicator and supports flicker-free USB-C mouse pass-through and overlay editor', () => {
